@@ -1,0 +1,294 @@
+1. import data from JSON file into MongoDB 
+
+---- import 1 json file into Collection ---
+
+mongoimport --db Rumour --collection sourcetweets --type=json --file RumourTweetDatasets\putinmissing\577258317942149120\source-tweets\577258317942149120.json
+
+mongoimport --db Rumour --collection retweets --type=json --file RumourTweetDatasets\putinmissing\576276947648405505\retweets.json
+
+---- import many JSON files at a time into Collections using for loop. Only available on CMD terminal ----
+
+for %i in (RumourTweetDatasets\putinmissing\*)  do mongoimport --file %i --type json --db Rumour --collection sourcetweets  
+
+---- export each collections into JSON file then import MongoDB Atlas --------
+
+mongoexport --db Rumour --collection sourcetweets --out=sourcectweet.json
+
+mongoimport --uri mongodb+srv://<server_name>@cluster0.bed0y.mongodb.net/RumourTweet --collection retweets --type json --file retweet.json
+
+mongoimport --uri mongodb+srv://<Server_name>@cluster0.bed0y.mongodb.net/RumourTweet --collection sourcetweets --type json --file sourcetweet.json
+
+-----------------------------------------------------------------------
+
+2. update document by adding annotaion field using CRUD operation 
+
+
+db.sourcetweets.update(
+{"id" : <sourcetweet_id>},
+{$set: {
+        "annotations" : { 
+            "is_rumour":"rumour",
+            "category":"Putin is facing a \"palace coup\"",
+            "misinformation":0,
+            "links":[
+                {
+                    "link":"http:\/\/www.forbes.com\/sites\/katyasoldak\/2015\/03\/12\/can-putins-absence-indicate-a-palace-coup-in-moscow\/",
+                    "mediatype":"news-media",
+                    "position":"for"
+                },
+                {
+                    "link":"http:\/\/www.express.co.uk\/news\/world\/563703\/UPDATE-Russian-President-Vladimir-Putin-baby-rumours-insider-warns-Kremlin-coup",
+                    "mediatype":"news-media",
+                    "position":"for"
+                },
+                {
+                    "link":"http:\/\/www.theblaze.com\/stories\/2015\/03\/14\/vladimir-putins-disappearance-could-mean-russias-undergoing-a-coup\/",
+                    "mediatype":"news-media",
+                    "position":"for"
+                }
+            ]
+        }
+    }
+}
+)
+
+
+-----------------------------------------
+
+3. 1st analysis on the key words and their frequencies
+
+Creating Word Cloud with word frequency by split text on MongoDb
+
+db.sourcetweets.aggregate( [ {$match:{"id":NumberLong("576812998418939904")}}, {$project: { splittext:{$split:["$text"," "]}}},  {$merge: "sourcetweets"}])
+
+
+db.sourcetweets.aggregate( [ {$match: {"_id": objectId("625e45b343d796b88c51927b")}},     {$project: { splittext:{ $split:["$text"," "]} } },  {$merge: "sourcetweets"} ])
+
+db.sourcetweets.aggregate( [ {$match: {"id": NumberLong("576276947648405505")}},     {$project: { splittext:{ $split:["$text"," "]} } },  {$merge: "sourcetweets"} ])
+
+
+-----------------------------------------
+4. 2nd analysis on how many times each tweet (both rumour and non-rumour)
+gets retweeted on social media
+
+
+
+var mapTweet = function() {
+   emit(this.retweeted_status.id, 1);
+};
+
+
+var reduceTweet = function(keyTweet, values) {
+   count = 0;
+      for(i = 0; i < values.length; i++) {
+        count+= values[i];
+      }
+      return count;
+};
+
+
+
+db.retweets.mapReduce(
+   mapTweet ,
+   reduceTweet,
+   { out: "retweet_count" }
+)
+
+----------------------------------------------------
+5. 3rd analysis on how fast each tweet (both rumour and non-rumour) gets
+retweeted on social media
+
+----------------------------------------------------
+
+6. 4th analysis on who tweeted the tweets, each of them was retweeted by whom
+Neo4J
+---import and create users from both source tweets and retweets ---
+CALL  apoc.load.json("sourcetweets.json") 
+YIELD value AS user
+MERGE (s:user {id:user.user.id})
+CALL apoc.load.json("retweets.json") 
+YIELD value  AS user 
+MERGE (r:user {id:user.user.id})
+
+---import and create tweets from both source tweets and retweets ---
+CALL apoc.load.json("sourcetweets.json") 
+YIELD value  AS tweet
+MERGE (r:tweet {id:tweet.id}) 
+SET r.owner=tweet.user.id
+
+CALL apoc.load.json("retweets.json") 
+YIELD value  AS tweet
+MERGE (r:tweet {id:tweet.id}) 
+SET r.owner=tweet.user.id
+SET r.source=tweet.retweeted_status.id
+
+---create relation---
+MATCH (u:user)
+WITH u
+MATCH (t:tweet) 
+WHERE u.id = t.owner
+CREATE (u)-[:owner]->(t);
+
+MATCH (t:tweet)
+WITH t
+MATCH (r:tweet) 
+WHERE t.id = r.source
+CREATE (t)-[:retweeted_by]->(r);
+------------------------------------------------------
+7. 5th analysis on where each tweet is tweeted
+by visualizing users’ locations on the map
+<html>
+  <head>
+  <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+  <script>
+    google.charts.load('current', {
+    'packages': ['map'],
+    'mapsApiKey': 'AIzaSyDLhAdGQ1y_Tm8dKGEFham8Ug1ZeA_NcFo'
+    });
+    google.charts.setOnLoadCallback(drawMap);
+    
+    function drawMap() {
+      var data = google.visualization.arrayToDataTable([
+        ['Country', 'name'],
+        ['Tokyo', 'Tokyo'],
+        ['San Francisco', 'San Francisco'],
+        ['West Bromwich', 'West Bromwich'],
+        ['Prague', 'Prague'],
+        ['Stockholm', 'Stockholm'],
+        ['Sweden', 'Sweden'],
+        ['Laholm', 'Laholm'],
+        ['USA', 'USA'],
+        ['Dallas', 'Dallas'],
+        ['Freistaat Groningen', 'Freistaat Groningen'],
+        ['Praha', 'Praha'],
+        ['Co Tipperary', 'Co Tipperary'],
+        ['Zurich', 'Zurich'],
+        ['Milan', 'Milan'],
+        ['Zürich', 'Zürich'],
+        ['Nairobi', 'Nairobi'],
+        ['Kyiv', 'Kyiv'],
+        ['Sarasota', 'Sarasota'],
+        ['Switzerland', 'Switzerland'],
+        ['Richmond', 'Richmond'],
+        ['Scotland', 'Scotland'],
+        ['Capelle aan den IJssel', 'Capelle aan den IJssel'],
+        ['Dublin', 'Dublin'],
+        ['Bilbao', 'Bilbao'],
+        ['Munich', 'Munich'],
+        ['In the empire of chaos ', 'In the empire of chaos'],
+        ['Region parisienne', 'Region parisienne'],
+        ['Southern California', 'Southern California'],
+        ['below the mason dixon line', 'below the mason dixon line'],
+        ['Bromsgrove', 'Bromsgrove'],
+        ['Worcestershire', 'Worcestershire'],
+        ['Kyrgyzstan', 'Kyrgyzstan'],
+        ['Bishkek', 'Bishkek'],
+        ['Deutschland', 'Deutschland'],
+        ['Lugansk', 'Lugansk'],
+        ['Donbass', 'Donbass'],
+        ['Punday', 'Punday'],
+        ['Canada', 'Canada'],
+        ['Colorado', 'Colorado'],
+        ['Frankfurt', 'Frankfurt'],
+        ['Multilingual', 'Multilingual'],
+        ['New England', 'New England'],
+        ['Moscow', 'Moscow'],
+        ['Russia', 'Russia'],
+        ['UK', 'UK'],
+        ['Devon', 'Devon'],
+        ['House of Commons', 'House of Commons'],
+        ['Brussels', 'Brussels'],
+        ['Luxembourg', 'Luxembourg'],
+        ['Sofia', 'Sofia'],
+        ['Dar Salaam', 'Dar Salaam'],
+        ['Brooklyn', 'Brooklyn'],
+        ['Madrid', 'Madrid'],
+        ['Tromsø', 'Tromsø'],
+        ['Norway', 'Norway'],
+        ['Earthling', 'Earthling'],
+        ['Västra Götaland', 'Västra Götaland'],
+        ['Twente', 'Twente'],
+        ['the Netherlands', 'the Netherlands'],
+        ['makerere university', 'makerere university'],
+        ['central scatland', 'central scatland'],
+        ['Europe', 'Europe'],
+        ['Екатеринбург', 'Екатеринбург'],
+        ['Islamabad', 'Islamabad'],
+        ['Pakistan', 'Pakistan'],
+        ['Buenos Aires', 'Buenos Aires'],
+        ['Lethbridge AB', 'Lethbridge AB'],
+        ['Serbia', 'Serbia'],
+        ['Belgrade', 'Belgrade'],
+        ['New York', 'New York'],
+        ['Sarajevo', 'Sarajevo'],
+        ['Kiev', 'Kiev'],
+        ['Washington', 'Washington'],
+        ['Toronto', 'Toronto'],
+        ['Maroubra Australia ', 'Maroubra Australia'],
+        ['Latvia', 'Latvia1'],
+        ['Maine', 'Maine'],
+        ['Largo', 'Largo'],
+        ['Pinellas County', 'Pinellas County'],
+        ['Warszawa', 'Warszawa'],
+        ['South Florida', 'South Florida'],
+        ['North Reading', 'North Reading'],
+        ['Glasgow', 'Glasgow'],
+        ['Columbia', 'Columbia'],
+        ['New Delhi', 'New Delhi'],
+        ['Finland', 'Finland'],
+        ['Huntsville', 'Huntsville'],
+        ['Alabama', 'Alabama'],
+        ['Bucharest', 'Bucharest'],
+        ['Romania', 'Romania'],
+        ['England', 'England'],
+        ['Egypt', 'Egypt'],
+        ['Northern Ireland', 'Northern Ireland'],
+        ['Edmonton', 'Edmonton1'],
+        ['London', 'London'],
+        ['DragonCity', 'DragonCity'],
+        ['Rīga', 'Rīga'],
+        ['Latvija', 'Latvija'],
+        ['Chicago', 'Chicago'],
+        ['Helsinki', 'Helsinki'],
+        ['Finland', 'Finland'],
+        ['San Diego', 'San Diego'],
+        ['California', 'California'],
+        ['Germany', 'Germany'],
+        ['Харьков', 'Харьков'],
+        ['Pittsboro', 'Pittsboro'],
+        ['zug', 'zug'],
+        ['Iowa', 'Iowa'],
+        ['Seattle', 'Seattle'],
+        ['Vancouver', 'Vancouver'],
+        ['Maritime Canada', 'Maritime Canada'],
+        ['Penfield', 'Penfield'],
+        ['Paris', 'Paris'],
+        ['Бийск', 'Бийск'],
+        ['Lithuania', 'Lithuania'],
+        ['Gondor', 'Gondor'],
+        ['Bangladesh', 'Bangladesh'],
+        ['București', 'București'],
+        ['România', 'România'],
+        ['Nevada', 'Nevada'],
+        ['Москва', 'Москва'],
+        ['Omnipresent', 'Omnipresent'],
+        ['Penfield', 'Penfield']
+      ]);
+    var options = {
+        icons: {
+            default: {
+              normal: 'https://icons.iconarchive.com/icons/icons-land/vista-map-markers/48/Map-Marker-Ball-Azure-icon.png'
+            }
+          },     
+        showTooltip: true,
+        showInfoWindow: true
+    };
+    var map = new google.visualization.Map(document.getElementById('chart_div'));
+    map.draw(data, options);
+  };
+  </script>
+  </head>
+  <body>
+    <div id="chart_div"></div>
+  </body>
+</html>
